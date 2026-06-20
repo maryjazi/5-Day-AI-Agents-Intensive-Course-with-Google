@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+
+# Personal data - never commit your real resume
+resume_data.py

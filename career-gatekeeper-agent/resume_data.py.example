@@ -1,0 +1,29 @@
+"""
+resume_data.py.example
+========================
+Copy this file to resume_data.py and fill in your real resume.
+resume_data.py is gitignored - it will never be committed or uploaded.
+"""
+
+MY_RESUME = """
+Your Name
+Your Title
+
+Contact: your.email@example.com | linkedin.com/in/yourprofile
+
+PROFESSIONAL EXPERIENCE
+
+[Start Date] - [End Date]: [Job Title]
+[Company Name], [Location]
+- Key responsibility or achievement
+- Key responsibility or achievement
+
+EDUCATION
+
+[Start Date] - [End Date]: [Degree]
+[Institution Name]
+
+KEY SKILLS
+
+[List your skills here, comma-separated]
+"""
