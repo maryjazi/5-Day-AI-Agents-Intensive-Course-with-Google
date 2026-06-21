@@ -195,8 +195,19 @@ async def async_main(resume_text: str, location: str = "remote"):
 
 
 if __name__ == "__main__":
+    # Make sure the project root (parent of this agent/ folder) is on
+    # sys.path, so `from resume_data import MY_RESUME` works no matter how
+    # this script is invoked. Plain `python agent/career_agent.py` only
+    # puts agent/ itself on sys.path, not the project root where
+    # resume_data.py actually lives - without this fix, the import below
+    # fails even when resume_data.py exists and is correctly filled in.
     import sys
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
     try:
         from resume_data import MY_RESUME
     except ImportError:

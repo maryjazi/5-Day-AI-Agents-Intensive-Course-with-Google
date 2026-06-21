@@ -130,6 +130,39 @@ def _normalize_jsearch_job(raw: dict) -> dict:
     }
 
 
+def _guess_country_code(location: str) -> str:
+    """
+    JSearch's 'country' parameter (ISO 3166 two-letter code) defaults to
+    'us' if not specified - even when the query text mentions a different
+    country. That mismatch silently returns zero results (a real bug we
+    hit: searching "IT Administrator in Germany" with no country param
+    returned 0 results because the API was scoped to the US).
+
+    This is a small, deliberately incomplete lookup for common cases. Add
+    more entries as needed, or pass a two-letter code directly as
+    `location` (e.g. "DE") to skip guessing entirely.
+    """
+    if not location or location.lower() == "remote":
+        return "us"
+    if len(location) == 2 and location.isalpha():
+        return location.lower()  # already a country code, e.g. "DE"
+
+    loc = location.lower()
+    country_map = {
+        "germany": "de", "deutschland": "de",
+        "united states": "us", "usa": "us",
+        "united kingdom": "gb", "uk": "gb",
+        "france": "fr", "spain": "es", "italy": "it",
+        "netherlands": "nl", "austria": "at", "switzerland": "ch",
+        "canada": "ca", "australia": "au", "india": "in",
+        "poland": "pl", "sweden": "se", "ireland": "ie",
+    }
+    for name, code in country_map.items():
+        if name in loc:
+            return code
+    return "us"  # fallback - matches JSearch's own default
+
+
 def debug_jsearch_raw_response(query: str = "IT Administrator", location: str = "Germany") -> None:
     """
     Debug helper - NOT an MCP tool, call directly with:
@@ -138,36 +171,86 @@ def debug_jsearch_raw_response(query: str = "IT Administrator", location: str = 
     Prints the raw, unmodified JSearch API response so you can confirm the
     actual field names if search_jobs() results look wrong (e.g. all
     titles/companies showing as "Unknown"). Requires RAPIDAPI_KEY to be set.
+
+    NOTE: when this module runs normally (as a subprocess spawned by
+    agent/career_agent.py), RAPIDAPI_KEY arrives via the subprocess env
+    that career_agent.py already loaded from .env. But when you call this
+    function directly with `python -c "..."` like above, nothing has
+    loaded .env yet - so we load it here too, specifically for this
+    standalone debug path.
     """
     import json
+    from dotenv import load_dotenv
 
-    if not RAPIDAPI_KEY:
-        print("RAPIDAPI_KEY is not set - nothing to debug.")
+    load_dotenv()  # picks up .env in the current working directory
+    key = os.getenv("RAPIDAPI_KEY", "")
+
+    if not key:
+        print(
+            "RAPIDAPI_KEY is not set - nothing to debug.\n"
+            "Make sure you're running this from the project root (where "
+            ".env lives) and that .env contains a RAPIDAPI_KEY= line."
+        )
         return
 
     url = f"https://{JSEARCH_HOST}/search"
     search_term = f"{query} in {location}"
-    headers = {"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": JSEARCH_HOST}
-    response = requests.get(url, headers=headers, params={"query": search_term, "page": "1"}, timeout=15)
-    print(f"HTTP {response.status_code}")
-    print(json.dumps(response.json(), indent=2)[:3000])
+    country = _guess_country_code(location)
+    headers = {"x-rapidapi-key": key, "x-rapidapi-host": JSEARCH_HOST}
+    response = requests.get(
+        url, headers=headers,
+        params={"query": search_term, "page": "1", "country": country},
+        timeout=30,
+    )
+    print(f"HTTP {response.status_code} (country param sent: {country})")
+    try:
+        print(json.dumps(response.json(), indent=2)[:3000])
+    except ValueError:
+        # Response body wasn't valid JSON (e.g. an empty or HTML error page
+        # from a 403/429) - show the raw text instead of crashing.
+        print("Response body was not valid JSON. Raw text:")
+        print(response.text[:1000])
 
 
 def _jsearch_search(query: str, location: str, max_results: int) -> list:
-    """Calls the real JSearch API (RapidAPI) for live job postings."""
+    """
+    Calls the real JSearch API (RapidAPI) for live job postings.
+
+    KNOWN ISSUE (confirmed via testing): JSearch's `country` parameter has
+    inconsistent coverage - e.g. country="de" (Germany) reliably returns
+    zero results even for broad queries like "developer", while the same
+    query with country="fr" (France) or no country param at all returns
+    real results. This isn't a bug in our code; it's a data-coverage gap
+    in the underlying API for certain countries.
+
+    Mitigation: if the first search (with an explicit country code) comes
+    back empty, we retry once without the country parameter, relying on
+    the query text itself (e.g. "developer in Germany") to scope the
+    search. This trades a bit of precision for actually getting results.
+    """
     url = f"https://{JSEARCH_HOST}/search"
     search_term = f"{query} in {location}" if location and location.lower() != "remote" else query
-    params = {"query": search_term, "page": "1", "num_pages": "1"}
+    country = _guess_country_code(location)
     headers = {
         "x-rapidapi-key": RAPIDAPI_KEY,
         "x-rapidapi-host": JSEARCH_HOST,
     }
 
-    response = requests.get(url, headers=headers, params=params, timeout=15)
+    params = {"query": search_term, "page": "1", "num_pages": "1", "country": country}
+    response = requests.get(url, headers=headers, params=params, timeout=30)
     response.raise_for_status()
     payload = response.json()
-
     results = payload.get("data", [])
+
+    if not results and country != "us":
+        # Retry without forcing a country code - let the query text alone
+        # ("... in Germany") do the scoping. See docstring above.
+        params_no_country = {"query": search_term, "page": "1", "num_pages": "1"}
+        response = requests.get(url, headers=headers, params=params_no_country, timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+        results = payload.get("data", [])
+
     normalized = [_normalize_jsearch_job(r) for r in results]
     return normalized[:max_results]
 
@@ -230,7 +313,7 @@ def get_job_details(job_url: str) -> dict:
     }
     try:
         response = requests.get(
-            url, headers=headers, params={"job_id": job_url}, timeout=15
+            url, headers=headers, params={"job_id": job_url}, timeout=30
         )
         response.raise_for_status()
         payload = response.json()

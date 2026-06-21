@@ -50,7 +50,6 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # edit .env and set GOOGLE_API_KEY (ADK uses this, not GEMINI_API_KEY)
-# if you want live job results, also set RAPIDAPI_KEY for JSearch on RapidAPI
 
 cp resume_data.py.example resume_data.py
 # edit resume_data.py and paste in your real resume text
@@ -66,15 +65,8 @@ cp resume_data.py.example resume_data.py
 
 ## Connecting a real job API (optional)
 
-By default, and whenever `RAPIDAPI_KEY` is not set, `search_jobs` returns a
-small set of mock postings so the pipeline is demoable without any external
-account.
-
-`RAPIDAPI_KEY` is the authentication key for RapidAPI. In this project, it is
-used by the JSearch API wrapper to request live job listings from third-party
-sources such as LinkedIn, Indeed, Glassdoor, and ZipRecruiter. Without this
-key, the agent still runs, but it uses local mock data instead of live search
-results.
+By default (no `RAPIDAPI_KEY` set), `search_jobs` returns a small set of
+mock postings so the pipeline is demoable without any external account.
 
 To get **live** job postings from LinkedIn, Indeed, Glassdoor, and
 ZipRecruiter instead:
@@ -97,6 +89,14 @@ response and adjust the `.get()` keys in `_normalize_jsearch_job()`:
 python -c "from mcp_server.job_search_server import debug_jsearch_raw_response as d; d()"
 ```
 
+**Country scoping:** JSearch's `country` parameter defaults to `us` if not
+set explicitly - searching "in Germany" without it can silently return
+zero results even though the request succeeds. `_guess_country_code()` in
+`job_search_server.py` maps common country names (Germany, France, UK,
+etc.) to their two-letter code automatically. If your country isn't in the
+list, either add it there or pass a two-letter code directly as the
+`location` argument (e.g. `location="DE"`).
+
 ## Run
 
 ```bash
@@ -105,9 +105,7 @@ python -m agent.career_agent
 
 This loads your resume from `resume_data.py` (private, gitignored) and runs
 it against the job-search MCP server (live JSearch data if `RAPIDAPI_KEY`
-is set, otherwise mock data). The RapidAPI key is only for live job search
-requests; it is not used for resume parsing or outreach drafting. To change
-the search location, edit the
+is set, otherwise mock data). To change the search location, edit the
 `location=` argument in `agent/career_agent.py`'s `__main__` block.
 
 ## Project structure
